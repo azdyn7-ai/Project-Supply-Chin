@@ -1,0 +1,214 @@
+name: Build, Sign, SBOM & SLSA Provenance
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD supply-chain pipeline (SLSA Level 3 target)
+#   build → push (GHCR) → cosign keyless sign → syft SBOM → cosign SBOM attest
+#         → SLSA build provenance → grype vulnerability scan
+# Pull requests only build the images to validate the Dockerfiles; pushing,
+# signing and attestation happen on the default branch and version tags.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "cnd-project/app/**"
+      - "cnd-project/enrichment-service/**"
+      - "cnd-project/feedback-service/**"
+      - ".github/workflows/build-sign-sbom.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "cnd-project/app/**"
+      - "cnd-project/enrichment-service/**"
+      - "cnd-project/feedback-service/**"
+      - ".github/workflows/build-sign-sbom.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-sign-sbom:
+    name: ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push images to GHCR
+      id-token: write # keyless cosign signing + provenance (OIDC)
+      attestations: write # SLSA build provenance attestations
+      security-events: write # upload grype SARIF to the Security tab
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: cnd-demo-app
+            context: cnd-project/app
+            dockerfile: cnd-project/app/Dockerfile
+          - component: enrichment-service
+            context: cnd-project/enrichment-service
+            dockerfile: cnd-project/enrichment-service/Dockerfile
+          - component: feedback-service
+            context: cnd-project/feedback-service
+            dockerfile: cnd-project/feedback-service/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image name & build metadata
+        run: |
+          echo "IMAGE=${REGISTRY}/${GITHUB_REPOSITORY,,}/${{ matrix.component }}" >> "$GITHUB_ENV"
+          echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      # ── Go sanity checks (cnd-demo-app is the only Go service) ──
+      - name: Set up Go
+        if: matrix.component == 'cnd-demo-app'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: cnd-project/app/go.sum
+
+      - name: Go build & vet
+        if: matrix.component == 'cnd-demo-app'
+        working-directory: cnd-project/app
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags & labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ env.BUILD_TIME }}
+            APP_VERSION=${{ github.ref_name }}
+          provenance: false # SLSA provenance is attached explicitly below
+          sbom: false # SBOM is generated explicitly below with Syft
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Everything below only runs when the image was actually pushed ──
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (Cosign keyless / Sigstore)
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Generate SBOM (Syft — CycloneDX)
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+          upload-artifact: true
+          artifact-name: sbom-${{ matrix.component }}.cyclonedx.json
+
+      - name: Attest SBOM to image (Cosign)
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign attest --yes \
+            --type cyclonedx \
+            --predicate sbom.cyclonedx.json \
+            "${IMAGE}@${DIGEST}"
+
+      # Authentic SLSA Level 3 provenance, verifiable in CI with `gh attestation verify`.
+      - name: Generate SLSA build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      # A second, Cosign-discoverable SLSA provenance so Kyverno's cosign attestor
+      # can verify provenance at admission time inside the cluster (Rule 3).
+      - name: Attest SLSA provenance (Cosign — for Kyverno admission)
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          jq -n \
+            --arg ref "$GITHUB_REF" \
+            --arg repo "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --arg sha "$GITHUB_SHA" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg repoid "$GITHUB_REPOSITORY_ID" \
+            --arg runid "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg started "$BUILD_TIME" \
+            '{buildDefinition:{buildType:"https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",externalParameters:{workflow:{ref:$ref,repository:$repo,path:".github/workflows/build-sign-sbom.yml"}},internalParameters:{github:{event_name:$event,repository_id:$repoid,runner_environment:"github-hosted"}},resolvedDependencies:[{uri:("git+"+$repo+"@"+$ref),digest:{gitCommit:$sha}}]},runDetails:{builder:{id:($repo+"/.github/workflows/build-sign-sbom.yml@"+$ref)},metadata:{invocationId:$runid,startedOn:$started}}}' \
+            > provenance.slsa.json
+          cosign attest --yes --type slsaprovenance1 --predicate provenance.slsa.json "${IMAGE}@${DIGEST}"
+
+      - name: Vulnerability scan (Grype)
+        id: scan
+        if: github.event_name != 'pull_request'
+        uses: anchore/scan-action@v4
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          fail-build: false # report vulnerabilities without blocking the demo
+          severity-cutoff: high
+          output-format: sarif
+
+      - name: Upload scan results (SARIF)
+        if: github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+          category: grype-${{ matrix.component }}
+
+      - name: Pipeline summary
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### 🔐 Supply-chain artifacts — ${{ matrix.component }}"
+            echo ""
+            echo "| Step | Status |"
+            echo "|------|--------|"
+            echo "| Image | \`${IMAGE}@${DIGEST}\` |"
+            echo "| Cosign signature | ✅ keyless (Sigstore) |"
+            echo "| SBOM | ✅ CycloneDX (Syft) + attested |"
+            echo "| SLSA provenance | ✅ attest-build-provenance |"
+            echo "| Vulnerability scan | ✅ Grype (SARIF uploaded) |"
+          } >> "$GITHUB_STEP_SUMMARY"
