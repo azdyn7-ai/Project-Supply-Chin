@@ -1,0 +1,229 @@
+Act as a Senior Lead DevSecOps Engineer and Academic Researcher specializing in Cloud-Native Security, Kubernetes, and Software Supply Chain Integrity.
+
+I am working on a graduation project titled: "Strengthening Cloud Software Supply Chain Security through the Integration of SLSA, Sigstore, and SBOM with Continuous Runtime Verification".
+
+Your mission is to guide me through the FULL practical implementation of this framework based on the following specific research objectives:
+1. Framework Design: Integrating SLSA Level 3 build processes (with verifiable provenance), SBOM generation (Syft), and Cryptographic Signing (Cosign) with Runtime Attestation (Falco/Tetragon) — connected via a Provenance Enrichment Service.
+2. Detection Accuracy: Measuring detection of image tampering, malicious dependencies, and runtime anomalies — with quantitative metrics (TPR, FPR, FNR, Detection Latency) across 10+ runs per scenario.
+3. Performance Assessment: Evaluating the overhead on CI/CD pipeline (build time, signing overhead, admission latency) and cluster resources (CPU, memory, network) using Prometheus/Grafana — compared across 3 modes: (A) No Security, (B) Build-time Only, (C) Integrated Framework.
+
+IMPORTANT: This project's core innovation is BRIDGING the gap between build-time security and runtime monitoring. Every step must contribute to this bridge. Do NOT treat build-time and runtime as separate silos.
+
+---
+
+**PHASE 0: PRE-REQUISITES & ENVIRONMENT SETUP**
+
+Before writing any code, you must explicitly state the required Operating System and environment.
+
+* **OS Requirement:** Ubuntu Linux 22.04 LTS (required for eBPF kernel support — kernel 5.15+). Verify with `uname -r`.
+* **Install List:** Provide exact `apt` and `brew` commands for ALL of the following:
+  - Container runtime: Docker (or containerd), Minikube (with docker driver, 2 nodes, 8GB RAM each)
+  - Kubernetes tools: kubectl, helm
+  - SLSA tools: slsa-verifier, cosign (v2.x)
+  - SBOM tools: syft, grype
+  - Runtime tools: falco (with eBPF driver), tetragon
+  - Policy: kyverno (via helm)
+  - Monitoring: Prometheus + Grafana (via helm)
+  - Build: Go (1.21+), git
+  - Misc: jq, yq, curl, openssl
+
+* **Cluster Setup:** Provide the exact `minikube start` command with flags for: 2 nodes, 8GB RAM, containerd runtime, and CNI=calico.
+* **Validation:** After setup, provide a validation script `validate_env.sh` that checks every tool is installed and the cluster is running. The script must exit 0 on success and print a clear error on failure.
+
+---
+
+**PHASE 1: THE SECURE BUILD PIPELINE (SLSA Level 3 + SBOM + Signing)**
+
+**Step 1: The Microservice Application**
+* Create a Go web application (NOT just "Hello World") that:
+  - Has a `/health` endpoint returning JSON status
+  - Has a `/version` endpoint returning build info
+  - Has 3+ third-party dependencies (e.g., gin-gonic, go-uuid, logrus) — these are needed for meaningful SBOM analysis
+  - Includes a `go.sum` file for reproducible builds
+* Provide the full `main.go`, `go.mod`, `go.sum`, and `Dockerfile` (multi-stage build).
+
+**Step 2: The Build Pipeline Script**
+* Write `build_pipeline.sh` that implements a SLSA Level 3 compliant build:
+  1. **Build** the Docker image from the Dockerfile (hermetic, no network access during build)
+  2. **Generate SLSA Provenance** — this is CRITICAL and must NOT be skipped:
+     - Use `slsa-github-generator` OR manually create a SLSA v1.0 provenance JSON that includes: builder ID, build type, source URI, commit hash, build inputs, output image digest, and timestamp
+     - Sign the provenance using Cosign: `cosign attest --predicate provenance.json --type slsaprovenance`
+  3. **Generate SBOM** using `syft` in SPDX-JSON format
+  4. **Attest SBOM** to the image using `cosign attach sbom`
+  5. **Sign** the image using `cosign sign` with keyless mode (Fulcio + Rekor) OR a generated key pair if keyless is unavailable
+  6. **Vulnerability Scan** the SBOM using `grype` and save the report
+  7. **Push** image, signatures, attestations, and SBOM to the local registry
+* The script must print a summary at the end showing: image digest, provenance status, SBOM package count, vulnerability counts (critical/high/medium/low), signature verification status.
+* The script must exit with error code if any step fails.
+
+**Step 3: Verification Script**
+* Write `verify_artifacts.sh` that:
+  1. Verifies the image signature: `cosign verify`
+  2. Verifies the SLSA provenance attestation: `cosign verify-attestation --type slsaprovenance`
+  3. Downloads and parses the SBOM: `cosign download sbom`
+  4. Extracts the list of ALL binaries and packages from the SBOM and saves to `allowed_binaries.json` and `allowed_packages.json`
+  5. Prints: "VERIFIED" if all checks pass, "FAILED" with specific reason if any check fails
+
+---
+
+**PHASE 2: ADMISSION CONTROL (The Gatekeeper)**
+
+**Step 4: Kyverno Policy Setup**
+* Install Kyverno via Helm on the cluster
+* Write a `ClusterPolicy` YAML that:
+  1. **BLOCKS** any image that does NOT have a valid Cosign signature from the expected key/identity
+  2. **BLOCKS** any image that does NOT have an SBOM attestation attached
+  3. **BLOCKS** any image that does NOT have SLSA provenance attestation
+  4. **BLOCKS** any image where Grype found CRITICAL or HIGH vulnerabilities (read from a ConfigMap of vulnerability policy)
+* Write a test script `test_admission.sh` that:
+  1. Attempts to deploy an unsigned image → must be REJECTED
+  2. Attempts to deploy a signed image without SBOM → must be REJECTED
+  3. Deploys the fully verified image from Phase 1 → must be ACCEPTED
+  4. Prints PASS/FAIL for each test case
+
+---
+
+**PHASE 3: PROVENANCE ENRICHMENT SERVICE (THE CORE INNOVATION)**
+
+This is the MOST IMPORTANT phase. This is what makes this project novel — connecting build-time metadata to runtime monitoring.
+
+**Step 5: The Enrichment Service**
+* Write a Python or Go service (`enrichment_service/`) that:
+  1. Watches for new Pod deployments via Kubernetes Watch API
+  2. When a new Pod is deployed, extracts the image reference
+  3. Fetches the SBOM for that image from the OCI registry using `cosign download sbom`
+  4. Parses the SBOM and extracts: list of allowed binaries (from `/usr/bin`, `/bin`, `/usr/local/bin`), list of allowed packages, list of allowed network ports
+  5. Fetches the SLSA provenance and extracts: builder identity, SLSA level, source repository
+  6. Fetches the signature verification status
+  7. Generates dynamic Falco rules for this specific image: a whitelist of allowed process names, a whitelist of allowed network connections
+  8. Stores the enrichment data in a ConfigMap named `provenance-<image-hash>` in the same namespace
+  9. Triggers Falco rules reload via `falcoctl` or API
+* Provide the full Dockerfile for this service
+* Provide the Kubernetes Deployment + Service + RBAC manifests
+* Provide a MutatingWebhookConfiguration that calls this service on every Pod creation
+
+**Step 6: SBOM-Aware Falco Rules**
+* Write `falco_rules.local.yaml` with THREE categories of rules:
+  1. **SBOM-Enriched Rules** (the novel contribution):
+     - Rule: "Process execution not in SBOM" — fires when a process executes in a container AND that process binary is NOT in the `allowed_binaries.json` from the enrichment ConfigMap for that image
+     - Rule: "Package not in SBOM" — fires when a new file appears in a package directory not listed in the SBOM
+     - Rule: "Network connection not expected" — fires when an outbound connection is made to a port/IP not matching the SBOM-declared dependencies
+     - Each alert MUST include enrichment context: image name, signer identity, SLSA level, SBOM source
+  2. **Standard Runtime Rules** (baseline for comparison):
+     - Shell spawned in container
+     - Read/write to sensitive directories (/etc/shadow, /root)
+     - Unexpected inbound network connections
+  3. **Supply Chain Specific Rules**:
+     - Image running with SLSA level below threshold
+     - Image signed by unknown identity
+     - ConfigMap modified after initial enrichment
+
+**Step 7: Tetragon Integration (Complementary)**
+* Install Tetragon via Helm
+* Write a `TracingPolicy` that:
+  1. Monitors process execution in namespaces with enriched images
+  2. Correlates with SBOM data from ConfigMaps
+  3. Logs events that include provenance context (image digest, SLSA level, signer)
+
+---
+
+**PHASE 4: FEEDBACK LOOP (Runtime → Build)**
+
+**Step 8: Bidirectional Feedback**
+* Write a `feedback_service/` (Python or Go) that:
+  1. Listens to Falco alerts via Falco sidekick or webhook output
+  2. When an SBOM-violation alert is received:
+     - Tags the image in the registry as "suspicious" using registry API or Cosign annotation
+     - Creates a Kubernetes Event on the Pod with provenance details
+     - Logs the incident with: timestamp, alert type, image, provenance data, SLSA level
+  3. When a runtime vulnerability exploitation is detected:
+     - Creates a priority ticket/notification with the SBOM package affected
+     - Suggests the specific dependency to update
+  4. Exposes a `/alerts` API endpoint that returns all incidents with full context
+* Provide full deployment manifests and test scripts
+
+---
+
+**PHASE 5: ATTACK SIMULATION & DETECTION EVALUATION**
+
+**Step 9: Attack Simulation Script**
+* Write `simulate_attacks.sh` that executes ALL three attack scenarios:
+
+  **Scenario 1: Image Tampering**
+  - Modify a signed image (change a binary) and re-push without re-signing
+  - Try to deploy the tampered image
+  - Expected: Blocked at admission (Step 4)
+
+  **Scenario 2: Malicious Dependency**
+  - Create a modified version of the Go app with an extra dependency that simulates malicious behavior (e.g., a package that makes an outbound connection to an unusual IP, or writes to /tmp/exfil.dat)
+  - Build, sign, and deploy this image properly (so it passes admission)
+  - Expected: Detected by runtime SBOM enrichment — the new process/connection is NOT in the original SBOM
+
+  **Scenario 3: Runtime Anomaly**
+  - Deploy the clean signed image
+  - `kubectl exec` into the running container and:
+    a) Run an unexpected binary (e.g., `curl` or `wget` if not in SBOM)
+    b) Open a reverse shell (`/bin/bash -i`)
+    c) Write to sensitive directories
+  - Expected: Detected by Falco with SBOM context (the binary is not in allowed_binaries.json)
+
+* Each scenario must be run 10 times automatically
+* The script must collect: detection result (detected/not), detection time (ms from attack to alert), alert content
+
+**Step 10: Measurement & Metrics Collection**
+
+* Write `collect_metrics.sh` that runs the FULL evaluation:
+
+  **Detection Accuracy Metrics** (for each scenario, 10 runs):
+  - True Positive Rate (TPR) = detected attacks / total attacks
+  - False Positive Rate (FPR) = run 10 clean deployments, count false alerts / 10
+  - False Negative Rate (FNR) = undetected attacks / total attacks
+  - Detection Latency = time from attack execution to first alert (average, min, max, stddev)
+
+  **Performance Overhead Metrics** (using Prometheus queries):
+  - Build Time: time `build_pipeline.sh` takes vs simple `docker build` (baseline)
+  - Signing Overhead: time for cosign sign + attest operations
+  - Admission Latency: time from `kubectl apply` to Pod Running (with and without Kyverno policies)
+  - CPU Overhead: average node CPU usage with and without Falco+Tetragon+Enrichment (from Prometheus `node_cpu_seconds_total`)
+  - Memory Overhead: average node memory usage with and without the framework (from Prometheus `node_memory_MemAvailable_bytes`)
+  - Network Overhead: bytes transferred with and without monitoring (from Prometheus `node_network_transmit_bytes_total`)
+
+  **Three-Mode Comparison:**
+  - Mode A: No security (baseline) — uninstall Kyverno, Falco, Tetragon
+  - Mode B: Build-time only — keep Kyverno admission, remove Falco/Tetragon/Enrichment
+  - Mode C: Full integrated framework — all components active
+  - Run all attack scenarios in each mode
+  - Generate a comparison table
+
+* Output all results as CSV files: `detection_results.csv`, `performance_results.csv`, `comparison_results.csv`
+* Provide Grafana dashboard JSON for visualizing the metrics
+
+---
+
+**PHASE 6: ANALYSIS & DOCUMENTATION**
+
+**Step 11: Results Analysis**
+* Write `analyze_results.py` that:
+  1. Reads all CSV files
+  2. Calculates mean, median, stddev for each metric
+  3. Generates comparison tables and charts (using matplotlib):
+     - Bar chart: TPR/FPR by scenario across Mode A/B/C
+     - Bar chart: Detection latency by scenario across Mode A/B/C
+     - Bar chart: CPU/Memory overhead across Mode A/B/C
+     - Line chart: Build time breakdown (build + sign + SBOM + attest)
+  4. Performs statistical significance tests (t-test) between Mode B and Mode C
+  5. Generates a LaTeX table formatted for academic publication
+
+---
+
+**OUTPUT FORMAT REQUIREMENTS:**
+- For every step: provide the FULL file content (do NOT use "..." or "similar to above")
+- Every script must include error handling (`set -euo pipefail` for bash)
+- Every Kubernetes manifest must include resource limits and requests
+- Every script must log its actions with timestamps
+- Every step must include a validation check that confirms it worked
+
+**TONE:**
+Be extremely precise, technical, and academic. Do not summarize; provide actionable code. Treat this as a deployment into a live research lab. Every component must connect to the provenance enrichment bridge — this is what makes the project novel.
+
+**Start now by defining the OS requirements and the Phase 0 tools setup.**
