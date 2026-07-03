@@ -8,14 +8,16 @@ metadata:
     component: tetragon-policy
   annotations:
     cnd.security/description: >
-      Tetragon TracingPolicy for CND Project.
-      Monitors process execution and correlates with SBOM provenance data.
+      Tetragon TracingPolicy for CND Project (Tetragon v1.1.0 compatible).
+      Uses kprobes only — LSM hooks (spec.tracing / spec.lsmhooks) require
+      Tetragon >= v1.3 with CONFIG_BPF_LSM=y kernel flag.
+      Monitors process execution, file access, and network connections.
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/part-of: cnd-project
 
-  # ── Monitor process execution ──────────────────────────────────
+  # ── Monitor unauthorized process execution ─────────────────────────────────
   kprobes:
     - call: "sys_execve"
       syscall: true
@@ -24,21 +26,18 @@ spec:
         - index: 0
           type: "string"
       selectors:
-        - matchNamespaces:
-            - operator: In
-              values:
-                - "cnd-demo"
-          matchArgs:
+        - matchArgs:
             - index: 0
               operator: "NotEqual"
               values:
                 - "/cnd-app"
                 - "/pause"
+                - "/bin/sh"
           matchActions:
-            - action: Sigkill      # Kill unauthorized processes immediately
-              argError: EPERM
+            - action: Sigkill
+              argError: 1        # 1 = EPERM (integer required by Tetragon v1.1.0)
 
-    # ── Monitor sensitive file access ──
+    # ── Monitor sensitive file access ───────────────────────────────────────
     - call: "sys_openat"
       syscall: true
       return: false
@@ -46,11 +45,7 @@ spec:
         - index: 1
           type: "string"
       selectors:
-        - matchNamespaces:
-            - operator: In
-              values:
-                - "cnd-demo"
-          matchArgs:
+        - matchArgs:
             - index: 1
               operator: "Prefix"
               values:
@@ -59,10 +54,10 @@ spec:
                 - "/root/"
                 - "/proc/1/"
           matchActions:
-            - action: Post        # Log but don't kill
+            - action: Post
               rateLimit: "1/min"
 
-    # ── Monitor network connections ──
+    # ── Monitor outbound network connections ────────────────────────────────
     - call: "sys_connect"
       syscall: true
       return: false
@@ -70,31 +65,6 @@ spec:
         - index: 0
           type: "int"
       selectors:
-        - matchNamespaces:
-            - operator: In
-              values:
-                - "cnd-demo"
-          matchActions:
+        - matchActions:
             - action: Post
               rateLimit: "10/min"
-
-  # ── Pod-level tracing (eBPF LSM) ──────────────────────────────
-  tracing:
-    - call: "security_bprm_check"
-      syscall: false
-      return: false
-      args:
-        - index: 0
-          type: "linux_binprm"
-      selectors:
-        - matchNamespaces:
-            - operator: In
-              values:
-                - "cnd-demo"
-          matchCapabilities:
-            - operator: "NotIn"
-              values:
-                - "CAP_SYS_ADMIN"
-          matchActions:
-            - action: Post
-              rateLimit: "5/min"
