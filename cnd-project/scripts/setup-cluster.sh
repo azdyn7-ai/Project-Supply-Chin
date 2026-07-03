@@ -11,7 +11,7 @@ info()  { echo -e "[$(TS)] ${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "[$(TS)] ${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "[$(TS)] ${RED}[ERROR]${NC} $*"; exit 1; }
 
-KYVERNO_VERSION="v1.12.6"
+KYVERNO_CHART_VERSION="3.2.8"   # Helm chart version (NOT app version v1.12.x)
 FALCO_VERSION="4.3.0"
 TETRAGON_VERSION="1.1.0"
 
@@ -84,10 +84,10 @@ start_minikube() {
     if minikube status 2>/dev/null | grep -q "Running"; then
         warn "Minikube already running. Skipping."; return
     fi
-    info "Starting Minikube (2 nodes, 8GB RAM, containerd, Calico CNI)..."
+    info "Starting Minikube (2 nodes, 6GB RAM/node, containerd, Calico CNI)..."
     minikube start \
-        --nodes=2 \
-        --memory=8192 \
+        --nodes=1 \
+        --memory=6144 \
         --cpus=4 \
         --driver=docker \
         --container-runtime=containerd \
@@ -97,6 +97,8 @@ start_minikube() {
         --addons=metrics-server,registry
 
     kubectl cluster-info
+    info "Adding worker node (required before Prometheus install)..."
+    minikube node add --profile=cnd-cluster || warn "Worker node add failed — Prometheus may timeout"
     info "Cluster nodes:"
     kubectl get nodes -o wide
 }
@@ -106,11 +108,11 @@ install_kyverno() {
     if kubectl get ns kyverno &>/dev/null; then
         warn "Kyverno already installed."; return
     fi
-    info "Installing Kyverno ${KYVERNO_VERSION}..."
+    info "Installing Kyverno (chart v${KYVERNO_CHART_VERSION})..."
     helm repo add kyverno https://kyverno.github.io/kyverno/ --force-update
     helm install kyverno kyverno/kyverno \
         --namespace kyverno --create-namespace \
-        --version "${KYVERNO_VERSION}" \
+        --version "${KYVERNO_CHART_VERSION}" \
         --set admissionController.replicas=1 \
         --wait --timeout=5m
     kubectl apply -f kubernetes/kyverno/verify-images-policy.yaml
@@ -158,13 +160,21 @@ install_monitoring() {
     if kubectl get ns monitoring &>/dev/null; then
         warn "Monitoring stack already installed."; return
     fi
-    info "Installing Prometheus + Grafana..."
+    info "Installing Prometheus + Grafana (timeout=20m, with resource limits)..."
     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
     helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
         --namespace monitoring --create-namespace \
         --set prometheus.prometheusSpec.retention=24h \
         --set grafana.adminPassword=cnd-research-2026 \
-        --wait --timeout=10m
+        --set prometheus.prometheusSpec.resources.requests.memory=512Mi \
+        --set prometheus.prometheusSpec.resources.requests.cpu=250m \
+        --set prometheus.prometheusSpec.resources.limits.memory=1Gi \
+        --set grafana.resources.requests.memory=256Mi \
+        --set grafana.resources.requests.cpu=100m \
+        --set grafana.resources.limits.memory=512Mi \
+        --set alertmanager.alertmanagerSpec.resources.requests.memory=128Mi \
+        --set prometheusOperator.resources.requests.memory=128Mi \
+        --wait --timeout=20m
     info "Monitoring installed — Grafana password: cnd-research-2026 ✓"
 }
 
