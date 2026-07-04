@@ -1,45 +1,58 @@
 # Falco Helm values — Chart 9.1.0 / Falco 0.44.1
 # Compatible with: Linux 6.8, containerd, minikube multi-node
+
 driver:
   kind: modern_ebpf
+
 extraVolumes:
   - name: sys-volume
     hostPath:
       path: /sys
+
 extraVolumeMounts:
   - name: sys-volume
     mountPath: /sys
     readOnly: true
+
 collectors:
   enabled: true
   containerEngine:
     enabled: true
     containerRuntime: containerd
     socketPath: /run/containerd/containerd.sock
+
 falco:
   rulesFiles:
     - /etc/falco/falco_rules.yaml
     - /etc/falco/falco_rules.local.yaml
     - /etc/falco/rules.d/cnd-rules.yaml
-  watch_config_files: false
+
+  watchConfigFiles: false
+
   json_output: true
   json_include_output_property: true
   json_include_tags_property: true
+
   log_level: info
   priority: debug
+
   stdout_output:
     enabled: true
+
   file_output:
     enabled: true
     keep_alive: false
     filename: /var/log/falco/cnd-alerts.json
+
   http_output:
     enabled: false
     url: http://falco-webhook-sink.cnd-demo:8088
+
 tolerations:
   - effect: NoSchedule
     key: node-role.kubernetes.io/control-plane
     operator: Exists
+
 resources:
   requests:
     cpu: 100m
@@ -47,6 +60,7 @@ resources:
   limits:
     cpu: 1000m
     memory: 1024Mi
+
 customRules:
   cnd-rules.yaml: |-
     - macro: cnd_demo_namespace
@@ -148,7 +162,4 @@ customRules:
         proc=%proc.name pod=%k8s.pod.name ns=%k8s.ns.name)
       priority: WARNING
       tags: [supply_chain, cnd_project, network, c2]
-ENDOFFILE
-echo "✅ الملف حُفظ"
-
 
