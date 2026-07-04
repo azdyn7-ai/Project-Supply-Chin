@@ -1,57 +1,45 @@
-# Helm values for Falco deployment (using falcosecurity/falco chart)
-# Install with:
-#   helm repo add falcosecurity https://falcosecurity.github.io/charts
-#   helm install falco falcosecurity/falco -n falco --create-namespace -f falco-values.yaml
-
+# Falco Helm values — Chart 9.1.0 / Falco 0.44.1
+# Compatible with: Linux 6.8, containerd, minikube multi-node
 driver:
-  kind: modern_ebpf   # Use modern eBPF driver (no kernel module needed)
-
+  kind: modern_ebpf
+extraVolumes:
+  - name: sys-volume
+    hostPath:
+      path: /sys
+extraVolumeMounts:
+  - name: sys-volume
+    mountPath: /sys
+    readOnly: true
 collectors:
   enabled: true
-  docker:
-    enabled: false
-  cri:
+  containerEngine:
     enabled: true
+    containerRuntime: containerd
     socketPath: /run/containerd/containerd.sock
-
 falco:
-  rules_file:
+  rulesFiles:
     - /etc/falco/falco_rules.yaml
     - /etc/falco/falco_rules.local.yaml
-    - /etc/falco/custom_rules/cnd-rules.yaml
-
+    - /etc/falco/rules.d/cnd-rules.yaml
+  watch_config_files: false
   json_output: true
   json_include_output_property: true
   json_include_tags_property: true
-
   log_level: info
-  priority: debug         # Capture all priorities
-
-  # Output to stdout (for log aggregation)
+  priority: debug
   stdout_output:
     enabled: true
-
-  # Output to file (for metrics collection)
   file_output:
     enabled: true
     keep_alive: false
     filename: /var/log/falco/cnd-alerts.json
-
-  # Webhook output (optional: send to SIEM)
   http_output:
     enabled: false
     url: http://falco-webhook-sink.cnd-demo:8088
-
-customRules:
-  cnd-rules.yaml: |
-    # Loaded from kubernetes/falco/custom-rules.yaml
-    # Apply separately via ConfigMap
-
 tolerations:
   - effect: NoSchedule
     key: node-role.kubernetes.io/control-plane
     operator: Exists
-
 resources:
   requests:
     cpu: 100m
@@ -59,3 +47,108 @@ resources:
   limits:
     cpu: 1000m
     memory: 1024Mi
+customRules:
+  cnd-rules.yaml: |-
+    - macro: cnd_demo_namespace
+      condition: k8s.ns.name = "cnd-demo"
+    - macro: trusted_binaries
+      condition: >
+        proc.name in (python3, gunicorn, sh, bash, ps, cat, ls, id, whoami, python, pip, pip3)
+    - macro: sensitive_directories
+      condition: >
+        fd.name startswith /etc or fd.name startswith /proc or
+        fd.name startswith /sys or fd.name startswith /root or
+        fd.name startswith /var/run/secrets
+    - macro: network_tools
+      condition: >
+        proc.name in (nc, ncat, netcat, nmap, curl, wget, socat, tcpdump, ssh, scp, ftp, telnet)
+    - macro: package_managers
+      condition: >
+        proc.name in (apt, apt-get, yum, dnf, rpm, dpkg, pip, pip3, npm, yarn, gem, go, cargo)
+    - rule: CND - Unexpected Process Execution
+      desc: Detects processes not in SBOM running inside cnd-demo containers.
+      condition: >
+        spawned_process and cnd_demo_namespace and container and
+        not trusted_binaries and not proc.name in (gunicorn)
+      output: >
+        [CND-SC-001] Unexpected process (image=%container.image.repository:%container.image.tag
+        proc=%proc.name pid=%proc.pid parent=%proc.pname cmdline=%proc.cmdline
+        user=%user.name ns=%k8s.ns.name pod=%k8s.pod.name)
+      priority: WARNING
+      tags: [supply_chain, cnd_project, tampering]
+    - rule: CND - Shell Spawned in Verified Container
+      desc: Shell spawned in container that should only run Flask/Gunicorn.
+      condition: >
+        spawned_process and cnd_demo_namespace and container and
+        proc.name in (bash, sh, dash, zsh, ksh, tcsh, fish) and proc.pname != gunicorn
+      output: >
+        [CND-SC-002] CRITICAL Shell spawned (image=%container.image.repository:%container.image.tag
+        shell=%proc.name pid=%proc.pid parent=%proc.pname cmdline=%proc.cmdline
+        user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name)
+      priority: CRITICAL
+      tags: [supply_chain, cnd_project, shell, container_escape]
+    - rule: CND - Package Manager in Runtime Container
+      desc: Package manager executed inside running container - malicious dependency attack.
+      condition: spawned_process and cnd_demo_namespace and container and package_managers
+      output: >
+        [CND-SC-003] Package manager executed (image=%container.image.repository:%container.image.tag
+        tool=%proc.name pid=%proc.pid cmdline=%proc.cmdline
+        user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name)
+      priority: CRITICAL
+      tags: [supply_chain, cnd_project, sbom, malicious_dependency]
+    - rule: CND - Sensitive File Read in Container
+      desc: Container reading sensitive files - credential harvesting indicator.
+      condition: >
+        open_read and cnd_demo_namespace and container and
+        sensitive_directories and not proc.name in (python3, gunicorn)
+      output: >
+        [CND-SC-004] Sensitive file access (image=%container.image.repository:%container.image.tag
+        file=%fd.name proc=%proc.name pid=%proc.pid
+        user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name)
+      priority: ERROR
+      tags: [supply_chain, cnd_project, file_access, credentials]
+    - rule: CND - Network Tool in Container
+      desc: Network tool executed inside cnd-demo - exfiltration or C2 indicator.
+      condition: spawned_process and cnd_demo_namespace and container and network_tools
+      output: >
+        [CND-SC-005] Network tool executed (image=%container.image.repository:%container.image.tag
+        tool=%proc.name pid=%proc.pid cmdline=%proc.cmdline
+        user=%user.name pod=%k8s.pod.name ns=%k8s.ns.name)
+      priority: CRITICAL
+      tags: [supply_chain, cnd_project, network, exfiltration]
+    - rule: CND - Container Running as Root
+      desc: Container running as root UID 0 - security context bypass.
+      condition: >
+        spawned_process and cnd_demo_namespace and container and
+        user.uid = 0 and not proc.name in (pause)
+      output: >
+        [CND-SC-006] Container running as root (image=%container.image.repository:%container.image.tag
+        proc=%proc.name pid=%proc.pid user=%user.name uid=%user.uid
+        pod=%k8s.pod.name ns=%k8s.ns.name)
+      priority: ERROR
+      tags: [supply_chain, cnd_project, root, privilege_escalation]
+    - rule: CND - Write to Read-Only Filesystem
+      desc: Write attempted to container filesystem that should be read-only.
+      condition: >
+        open_write and cnd_demo_namespace and container and
+        not fd.name startswith /tmp and not fd.name startswith /proc
+      output: >
+        [CND-SC-007] Write to filesystem (image=%container.image.repository:%container.image.tag
+        file=%fd.name proc=%proc.name pid=%proc.pid user=%user.name pod=%k8s.pod.name)
+      priority: ERROR
+      tags: [supply_chain, cnd_project, filesystem, tampering]
+    - rule: CND - Unexpected Outbound Network Connection
+      desc: cnd-demo established unexpected outbound connection - C2 indicator.
+      condition: >
+        outbound and cnd_demo_namespace and container and
+        not (fd.sport in (8080, 443, 80)) and fd.net != "127.0.0.1/8"
+      output: >
+        [CND-SC-008] Unexpected outbound connection (image=%container.image.repository:%container.image.tag
+        connection=%fd.name proto=%fd.proto sport=%fd.sport dport=%fd.dport
+        proc=%proc.name pod=%k8s.pod.name ns=%k8s.ns.name)
+      priority: WARNING
+      tags: [supply_chain, cnd_project, network, c2]
+ENDOFFILE
+echo "✅ الملف حُفظ"
+
+
