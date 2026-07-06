@@ -57,6 +57,8 @@ spec:
                     - keyless:
                         subject: "https://github.com/azdyn7-ai/Project-Supply-Chin/*"
                         issuer: "https://token.actions.githubusercontent.com"
+                        rekor:
+                          url: https://rekor.sigstore.dev
 
     # ─────────────────────────────────────────────
     # RULE 3: Require SLSA Provenance
@@ -77,6 +79,8 @@ spec:
                     - keyless:
                         subject: "https://github.com/azdyn7-ai/Project-Supply-Chin/*"
                         issuer: "https://token.actions.githubusercontent.com"
+                        rekor:
+                          url: https://rekor.sigstore.dev
               conditions:
                 - all:
                     - key: "{{ buildDefinition.buildType }}"
