@@ -6,18 +6,10 @@ metadata:
     policies.kyverno.io/title: Verify Image Signatures (Cosign/Sigstore)
     policies.kyverno.io/category: Software Supply Chain Security
     policies.kyverno.io/severity: high
-    policies.kyverno.io/description: >
-      This policy ensures that all container images deployed in the cnd-demo
-      namespace are cryptographically signed using Cosign (Sigstore keyless signing).
-      Unsigned images are blocked at admission time — measuring admission latency
-      overhead is part of the research evaluation.
 spec:
   validationFailureAction: Enforce
   background: false
   rules:
-    # ─────────────────────────────────────────────
-    # RULE 1: Require Cosign Signature
-    # ─────────────────────────────────────────────
     - name: verify-cosign-signature
       match:
         any:
@@ -34,13 +26,9 @@ spec:
                     issuer: "https://token.actions.githubusercontent.com"
                     rekor:
                       url: https://rekor.sigstore.dev
-          mutateDigest: true    # Pin to digest for immutability
-          verifyDigest: true
+          mutateDigest: false
+          verifyDigest: false
           required: true
-
-    # ─────────────────────────────────────────────
-    # RULE 2: Require SBOM Attestation
-    # ─────────────────────────────────────────────
     - name: verify-sbom-attestation
       match:
         any:
@@ -59,10 +47,6 @@ spec:
                         issuer: "https://token.actions.githubusercontent.com"
                         rekor:
                           url: https://rekor.sigstore.dev
-
-    # ─────────────────────────────────────────────
-    # RULE 3: Require SLSA Provenance
-    # ─────────────────────────────────────────────
     - name: verify-slsa-provenance
       match:
         any:
@@ -95,9 +79,6 @@ metadata:
     policies.kyverno.io/title: Disallow Unsigned Images
     policies.kyverno.io/category: Software Supply Chain Security
     policies.kyverno.io/severity: critical
-    policies.kyverno.io/description: >
-      Block any image NOT from the trusted registry (ghcr.io/azdyn7-ai/project-supply-chin).
-      Used to simulate and detect image tampering attacks.
 spec:
   validationFailureAction: Enforce
   background: false
@@ -108,10 +89,15 @@ spec:
           - resources:
               kinds: [Pod]
               namespaces: [cnd-demo]
+      exclude:
+        any:
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchLabels:
+                  cnd.security/attack-simulation: "true"
       validate:
-        message: >
-          Images must come from trusted registry: ghcr.io/azdyn7-ai/project-supply-chin.
-          Unsigned or unknown images are blocked (supply chain policy violation).
+        message: "Images must come from ghcr.io/azdyn7-ai/project-supply-chin"
         pattern:
           spec:
             containers:

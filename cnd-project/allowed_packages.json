@@ -1,0 +1,124 @@
+{
+  "packages": [
+    {
+      "name": "base-files",
+      "version": "12.4+deb12u14",
+      "purl": "pkg:deb/debian/base-files@12.4%2Bdeb12u14?arch=amd64&distro=debian-12"
+    },
+    {
+      "name": "github.com/azdyn7-ai/Project-Supply-Chin/cnd-project/app",
+      "version": "UNKNOWN",
+      "purl": "pkg:golang/github.com/azdyn7-ai/Project-Supply-Chin/cnd-project/app"
+    },
+    {
+      "name": "github.com/gabriel-vasile/mimetype",
+      "version": "v1.4.2",
+      "purl": "pkg:golang/github.com/gabriel-vasile/mimetype@v1.4.2"
+    },
+    {
+      "name": "github.com/gin-contrib/sse",
+      "version": "v0.1.0",
+      "purl": "pkg:golang/github.com/gin-contrib/sse@v0.1.0"
+    },
+    {
+      "name": "github.com/gin-gonic/gin",
+      "version": "v1.9.1",
+      "purl": "pkg:golang/github.com/gin-gonic/gin@v1.9.1"
+    },
+    {
+      "name": "github.com/go-playground/locales",
+      "version": "v0.14.1",
+      "purl": "pkg:golang/github.com/go-playground/locales@v0.14.1"
+    },
+    {
+      "name": "github.com/go-playground/universal-translator",
+      "version": "v0.18.1",
+      "purl": "pkg:golang/github.com/go-playground/universal-translator@v0.18.1"
+    },
+    {
+      "name": "github.com/go-playground/validator/v10",
+      "version": "v10.14.0",
+      "purl": "pkg:golang/github.com/go-playground/validator/v10@v10.14.0"
+    },
+    {
+      "name": "github.com/google/uuid",
+      "version": "v1.6.0",
+      "purl": "pkg:golang/github.com/google/uuid@v1.6.0"
+    },
+    {
+      "name": "github.com/leodido/go-urn",
+      "version": "v1.2.4",
+      "purl": "pkg:golang/github.com/leodido/go-urn@v1.2.4"
+    },
+    {
+      "name": "github.com/mattn/go-isatty",
+      "version": "v0.0.19",
+      "purl": "pkg:golang/github.com/mattn/go-isatty@v0.0.19"
+    },
+    {
+      "name": "github.com/pelletier/go-toml/v2",
+      "version": "v2.0.8",
+      "purl": "pkg:golang/github.com/pelletier/go-toml/v2@v2.0.8"
+    },
+    {
+      "name": "github.com/sirupsen/logrus",
+      "version": "v1.9.3",
+      "purl": "pkg:golang/github.com/sirupsen/logrus@v1.9.3"
+    },
+    {
+      "name": "github.com/ugorji/go/codec",
+      "version": "v1.2.11",
+      "purl": "pkg:golang/github.com/ugorji/go/codec@v1.2.11"
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "version": "v0.9.0",
+      "purl": "pkg:golang/golang.org/x/crypto@v0.9.0"
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "v0.10.0",
+      "purl": "pkg:golang/golang.org/x/net@v0.10.0"
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "v0.8.0",
+      "purl": "pkg:golang/golang.org/x/sys@v0.8.0"
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "v0.9.0",
+      "purl": "pkg:golang/golang.org/x/text@v0.9.0"
+    },
+    {
+      "name": "google.golang.org/protobuf",
+      "version": "v1.30.0",
+      "purl": "pkg:golang/google.golang.org/protobuf@v1.30.0"
+    },
+    {
+      "name": "gopkg.in/yaml.v3",
+      "version": "v3.0.1",
+      "purl": "pkg:golang/gopkg.in/yaml.v3@v3.0.1"
+    },
+    {
+      "name": "media-types",
+      "version": "10.0.0",
+      "purl": "pkg:deb/debian/media-types@10.0.0?arch=all&distro=debian-12"
+    },
+    {
+      "name": "netbase",
+      "version": "6.4",
+      "purl": "pkg:deb/debian/netbase@6.4?arch=all&distro=debian-12"
+    },
+    {
+      "name": "stdlib",
+      "version": "go1.21.13",
+      "purl": "pkg:golang/stdlib@1.21.13"
+    },
+    {
+      "name": "tzdata",
+      "version": "2026b-0+deb12u1",
+      "purl": "pkg:deb/debian/tzdata@2026b-0%2Bdeb12u1?arch=all&distro=debian-12"
+    }
+  ]
+}

@@ -14,7 +14,7 @@ mkdir -p "$RESULTS_DIR"
 PERF_CSV="$RESULTS_DIR/performance_results.csv"
 COMP_CSV="$RESULTS_DIR/comparison_results.csv"
 SAMPLES="${METRIC_SAMPLES:-5}"
-IMAGE_REF="${IMAGE_REF:-localhost:5001/cnd-demo-app:latest}"
+IMAGE_REF="${IMAGE_REF:-ghcr.io/azdyn7-ai/project-supply-chin/cnd-demo-app:latest}"
 PROM_URL="${PROMETHEUS_URL:-http://localhost:9090}"
 
 echo "metric,mode,value_ms,unit,sample" > "$PERF_CSV"
