@@ -2,48 +2,78 @@
 
 **Strengthening Cloud Software Supply Chain Security through the Integration of SLSA, Sigstore, and SBOM with Continuous Runtime Verification**
 
-> Bachelor's Graduation Project | Computer Network Engineering and Distributed Systems  
-> Taiz University, Faculty of Engineering & IT | Supervised by: Dr. Raad Al Selwi
+> Bachelor's Graduation Project | Department of Computer Network Engineering and Distributed Systems  
+> Faculty of Engineering and Information Technology, Taiz University, Yemen  
+> University: https://www.taiz.edu.ye/  
+> Students: Ezzaldeen Sultan Ahmed and Tawhib AbdlQAder Hassan
 
 ---
 
-## Core Innovation: Provenance Enrichment Service
+## Project Overview
 
-The key contribution of this project is the **bridge between build-time and runtime security**:
+This repository presents a comprehensive DevSecOps-oriented research and implementation framework for strengthening software supply chain security in cloud-native environments. The project addresses a critical gap in modern containerized systems: the separation between build-time assurance and runtime protection. By combining cryptographic image verification, software bill of materials (SBOM) validation, SLSA provenance attestation, admission control, and runtime monitoring, the system offers a layered defense model for securing container deployments from image tampering, malicious dependency injection, and post-deployment compromise.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  PHASE 1: BUILD TIME (GitHub Actions)                                │
-│  Go App → Docker Build → Cosign Sign → Syft SBOM → SLSA Provenance │
-└───────────────────┬─────────────────────────────────────────────────┘
-                    │ signed image + SBOM + SLSA attestations
-┌───────────────────▼─────────────────────────────────────────────────┐
-│  PHASE 2: ADMISSION (Kyverno)                                        │
-│  Verify signature ✓ | Verify SBOM ✓ | Verify SLSA ✓ → DEPLOY      │
-└───────────────────┬─────────────────────────────────────────────────┘
-                    │
-┌───────────────────▼─────────────────────────────────────────────────┐
-│  PHASE 3: PROVENANCE ENRICHMENT SERVICE ← CORE INNOVATION           │
-│  • Watches new Pod deployments via Kubernetes Watch API              │
-│  • Fetches SBOM → extracts allowed binaries/packages/ports          │
-│  • Fetches SLSA provenance → extracts builder identity, SLSA level  │
-│  • Generates DYNAMIC Falco rules from SBOM inventory                │
-│  • Stores enrichment data in ConfigMap provenance-<hash>            │
-│  • Triggers Falco rules reload                                       │
-└───────────────────┬─────────────────────────────────────────────────┘
-                    │ SBOM-enriched rules
-┌───────────────────▼─────────────────────────────────────────────────┐
-│  PHASE 3: RUNTIME (Falco eBPF + Tetragon)                           │
-│  Rules derived from SBOM → detect SBOM violations at runtime        │
-└───────────────────┬─────────────────────────────────────────────────┘
-                    │ runtime alerts
-┌───────────────────▼─────────────────────────────────────────────────┐
-│  PHASE 4: FEEDBACK LOOP (Feedback Service)                           │
-│  • Tags suspicious images in registry via Cosign annotation         │
-│  • Creates Kubernetes Events with provenance context                 │
-│  • Exposes /alerts API with full incident history                    │
-└─────────────────────────────────────────────────────────────────────┘
-```
+The work was developed as a Bachelor's graduation project and is intended to demonstrate how academic research principles can be translated into a practical, production-relevant security architecture. The implementation is designed not only as a technical prototype, but also as a reproducible framework for evaluation, demonstration, and future extension in both academic and professional environments.
+
+## Academic and Research Significance
+
+The core innovation of this project is the integration of build-time verification and runtime detection through a provenance-enrichment mechanism. Rather than treating security as a single-point control, the architecture creates a continuous chain of trust that links:
+
+- image integrity at build time,
+- admission-time policy enforcement,
+- runtime behavioral detection, and
+- feedback-driven remediation.
+
+This multi-layered strategy provides a stronger security posture for organizations adopting Kubernetes-based workloads and modern CI/CD pipelines.
+
+## Construction and Implementation Process
+
+The implementation follows a structured pipeline that can be summarized in four phases:
+
+1. Build-time verification: Docker images are built, signed with Cosign, scanned with Grype, and accompanied by SBOM and SLSA provenance metadata.
+2. Admission-time enforcement: Kyverno policies verify image signatures, SBOM compliance, and provenance attestation before deployment is allowed.
+3. Runtime monitoring: Falco and Tetragon observe container behavior and detect suspicious process execution, package-manager activity, sensitive file access, and unauthorized network behavior.
+4. Feedback and reporting: the feedback service collects evidence, enriches incidents with provenance context, and produces results suitable for evaluation and presentation.
+
+## Tools and Technologies Used
+
+The project integrates a modern DevSecOps toolchain, including:
+
+- GitHub Actions for CI/CD automation and artifact generation
+- Docker and Buildx for container image construction
+- Cosign for keyless image signing and verification
+- Syft for SBOM generation
+- Grype for vulnerability scanning
+- SLSA provenance attestation for build integrity evidence
+- Kyverno for Kubernetes admission control
+- Falco for runtime threat detection
+- Tetragon for eBPF-based process and syscall tracing
+- Prometheus and Grafana for monitoring and metrics visualization
+- Go, Python, and Bash for the implementation of services and automation scripts
+
+## Evaluation, Results, and Demonstration
+
+The repository includes an end-to-end evaluation workflow that validates the framework under realistic attack scenarios. The automated workflow supports:
+
+- admission-control testing for unsigned or tampered images,
+- runtime attack simulation for shell execution and malicious dependency behavior,
+- false-positive analysis for clean deployments, and
+- performance and overhead measurement for the security pipeline.
+
+The resulting outputs are stored in the evaluation directory and include CSV reports, analysis scripts, and chart-generation support for academic presentation and documentation.
+
+## Future Management and Project Evolution
+
+The project is designed to be extensible and maintainable. Future management should focus on the following areas:
+
+- operational hardening for production deployment environments,
+- expansion of detection rules and policy coverage,
+- integration with additional registries and artifact repositories,
+- stronger evidence correlation between build-time and runtime telemetry,
+- incorporation of policy-as-code and continuous compliance workflows,
+- broader benchmarking and comparison with other supply-chain security frameworks.
+
+This roadmap ensures that the project remains relevant as both an academic contribution and a practical reference architecture for secure cloud-native software delivery.
 
 ---
 
@@ -84,7 +114,7 @@ cnd-project/
 │   ├── build_pipeline.sh        # SLSA L3 build: build+sign+SBOM+provenance
 │   ├── verify_artifacts.sh      # Verify: signature + SLSA + SBOM
 │   ├── test_admission.sh        # 3 Kyverno admission tests (PASS/FAIL)
-│   ├── simulate_attacks.sh      # 3 scenarios × 10 runs → detection_results.csv
+│   ├── simulate_attacks.sh      # 3 scenarios × 5 runs → detection_results.csv
 │   ├── collect_metrics.sh       # 3-mode overhead comparison → CSV
 │   └── watch-falco.sh           # Live Falco alert monitor
 │
@@ -97,11 +127,9 @@ cnd-project/
 
 ## Quick Start
 
-### Option A — Quick demo (Replit or any machine, no cluster)
+### Option A — Quick demo (local machine, no cluster)
 
-The demo microservice exposes `/health`, `/version` and `/api/data`. A Python Flask
-equivalent is included for zero-dependency runs; on Replit it starts automatically on
-port 5000.
+The demo microservice exposes `/health`, `/version` and `/api/data`. A lightweight local runtime is included for rapid evaluation and demonstration without requiring a Kubernetes cluster.
 
 ```bash
 python cnd-project/app/main.py      # Flask demo  → http://localhost:5000
@@ -131,7 +159,7 @@ bash scripts/verify_artifacts.sh localhost:5001/cnd-demo-app:latest
 # Step 4: Test admission control
 bash scripts/test_admission.sh
 
-# Step 5: Run attack simulation (10 runs × 3 scenarios)
+# Step 5: Run attack simulation (5 runs × 3 scenarios)
 bash scripts/simulate_attacks.sh
 # → produces: evaluation/results/detection_results.csv
 
@@ -227,7 +255,7 @@ gh attestation verify oci://<image> --repo azdyn7-ai/Project-Supply-Chin
 | S2 | Runtime shell | kubectl exec bash into container | Falco SBOM rule: shell not in SBOM |
 | S3 | Malicious dependency | pip install inside container | Falco SBOM rule: package manager not in SBOM |
 
-**False Positive Test**: 10 clean deployments — zero alerts expected
+**False Positive Test**: 5 clean deployments — zero alerts expected
 
 ---
 
