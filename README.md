@@ -1,4 +1,4 @@
-# Project-Supply-Chin
+# Project-Cloud Software Supply Chain
 
 **An Integrated Cloud Software Supply-Chain Security Framework** — combining SLSA
 provenance, Sigstore/Cosign signing, and SBOMs at build time with continuous
