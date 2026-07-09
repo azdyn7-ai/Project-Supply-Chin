@@ -30,7 +30,7 @@ Project-Supply-Chin/
 
 ## Try it in 30 seconds
 
-The demo microservice exposes `/health`, `/version`, and `/api/data`. On Replit it
+The demo microservice exposes `/health`, `/version`, and `/api/data`. On   it
 runs automatically on port **5000**:
 
 ```bash
